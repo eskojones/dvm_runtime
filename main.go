@@ -34,7 +34,6 @@ const (
 )
 
 type instr_fn func(*context) int
-
 type instr struct {
 	name   string
 	opcode uint8
@@ -54,13 +53,18 @@ func startup() {
 
 	// HLT - Halt Program
 	loadInstruction(instr{"hlt", 0xff, 1, (func(ctx *context) int {
-		fmt.Printf("[i] halting execution\n")
+		if debug_mode {
+			fmt.Printf("[i] halting execution\n")
+		}
 		ctx.flags[flag_halt] = 1
 		return 0xfe
 	})})
 
 	// PRINT - Print the value of register to debug output
 	loadInstruction(instr{"print", 0xfe, 2, (func(ctx *context) int {
+		if !debug_mode {
+			return 0
+		}
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		value := ctx.registers[reg_index]
 		fmt.Printf("[i] 0x%04x       R%d = 0x%04x\n", ctx.registers[reg_pc], reg_index, value)
@@ -74,7 +78,6 @@ func startup() {
 		mem_lowbyte := uint16(ctx.memory[ctx.registers[reg_pc]+3])
 		mem_address := (mem_highbyte << 8) + mem_lowbyte
 		mem_value := uint16(ctx.memory[mem_address])<<8 + uint16(ctx.memory[mem_address+1])
-		// fmt.Printf("[i] load R%d <= 0x%04x (0x%04x)\n", reg_index, mem_address, mem_value)
 		ctx.registers[reg_index] = mem_value
 		return 0
 	})})
@@ -87,7 +90,6 @@ func startup() {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+3]
 		reg_value_highbyte := uint8(ctx.registers[reg_index] >> 8)
 		reg_value_lowbyte := uint8(ctx.registers[reg_index] & 0x00ff)
-		// fmt.Printf("[i] store 0x%04x <= R%d (0x%02x%02x)\n", mem_address, reg_index, reg_value_highbyte, reg_value_lowbyte)
 		ctx.memory[mem_address] = reg_value_highbyte
 		ctx.memory[mem_address+1] = reg_value_lowbyte
 		return 0
@@ -115,7 +117,9 @@ func startup() {
 	// RET              - Pop PC off of callstack and jump to address
 	loadInstruction(instr{"ret", 0x05, 1, (func(ctx *context) int {
 		if ctx.registers[reg_sp] == 0 {
-			fmt.Printf("[!] invalid stack depth!")
+			if debug_mode {
+				fmt.Printf("[!] invalid stack depth!")
+			}
 			return 0xff
 		}
 		ctx.registers[reg_sp]--
@@ -374,7 +378,9 @@ func startup() {
 	// CALL reg     - Push PC onto callstack and jump to address contained in register
 	loadInstruction(instr{"call", 0x1e, 2, (func(ctx *context) int {
 		if ctx.registers[reg_sp] == 1023 {
-			fmt.Printf("[!] maximum callstack exceeded!")
+			if debug_mode {
+				fmt.Printf("[!] maximum callstack exceeded!")
+			}
 			return 0xff
 		}
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
@@ -388,7 +394,9 @@ func startup() {
 	// CALL address     - Push PC onto callstack and jump to address
 	loadInstruction(instr{"calli", 0x1f, 3, (func(ctx *context) int {
 		if ctx.registers[reg_sp] == 1023 {
-			fmt.Printf("[!] maximum callstack exceeded!")
+			if debug_mode {
+				fmt.Printf("[!] maximum callstack exceeded!")
+			}
 			return 0xff
 		}
 		address_highbyte := ctx.memory[ctx.registers[reg_pc]+1]
@@ -405,7 +413,9 @@ func step(instructions map[uint8]instr, ctx *context) int {
 	opcode := ctx.memory[ctx.registers[reg_pc]]
 	instr, exists := instructions[opcode]
 	if !exists {
-		fmt.Printf("[!] 0x%04x invalid opcode 0x%02x\n", ctx.registers[reg_pc], opcode)
+		if debug_mode {
+			fmt.Printf("[!] 0x%04x invalid opcode 0x%02x\n", ctx.registers[reg_pc], opcode)
+		}
 		return 0xff
 	}
 
@@ -444,44 +454,62 @@ func handleInterrupts(ctx *context, interrupt uint8) {
 	case 2: //print char in address stored in r0
 		fmt.Printf("%c", ctx.memory[ctx.registers[0]])
 	case 3: //print chars at address stored in r0 until null reached
+		var out_str = make([]byte, 1)
 		for i := ctx.registers[0]; ctx.memory[i] != 0; i++ {
-			fmt.Printf("%c", ctx.memory[i])
+			out_str = append(out_str, ctx.memory[i])
+		}
+		os.Stdout.WriteString(string(out_str[:]))
+	default:
+		if debug_mode {
+			fmt.Printf("[!] 0x%04x invalid interrupt (0x%02x)\n", ctx.registers[reg_pc], interrupt)
 		}
 	}
 }
 
 func loadProgram(ctx *context, program []uint8, offset uint16) {
-	for index, value := range program {
-		ctx.memory[offset+uint16(index)] = value
+	// load data segment
+	data_size := uint16(program[0])<<8 + uint16(program[1])
+	// fmt.Printf("data_size=%d bytes\n", data_size)
+	var i uint16 = 2
+	for i < data_size+2 {
+		item_offset := uint16(program[i])<<8 + uint16(program[i+1])
+		item_length := uint16(program[i+2])<<8 + uint16(program[i+3])
+		i += 4
+		item_value := program[i : i+item_length]
+		// fmt.Printf("- item_offset=%04x\n", item_offset)
+		// fmt.Printf("- item_length=%d bytes\n", item_length)
+		// fmt.Printf("- item_value=%s\n", item_value)
+
+		i += item_length
+		for j := uint16(0); j < item_length; j++ {
+			ctx.memory[item_offset+j] = item_value[j]
+		}
+	}
+
+	// copy code segment
+	j := uint16(0)
+	for i := data_size + 2; i < uint16(len(program)); i++ {
+		ctx.memory[offset+j] = program[i]
+		j++
 	}
 }
 
-func main() {
-	startup()
-
-	bytecode, err := os.ReadFile(os.Args[1])
-	if err != nil {
-		fmt.Printf("file not found\n")
-		return
-	}
-
-	program := []uint8(bytecode[:])
+func printProgram(program []uint8) {
+	fmt.Printf("Program: ")
 	for _, b := range program {
 		fmt.Printf("%02x ", b)
 	}
 	fmt.Printf("\n")
+}
 
-	// program := []uint8{
-	// 	op["movi"],  0x00, 0x00, 0x00,
-	// 	op["movi"],  0x05, 0x00, 0x45,
-	// //0x0008:
-	// 	op["addi"],  0x00, 0x00, 0x01,
-	// 	op["print"], 0x00,
-	// 	op["cmp"],   0x00, 0x05,
-	// 	op["jli"],   0x00, 0x08,
-	// 	op["hlt"],
-	// }
+func main() {
+	bytecode, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		fmt.Printf("unable to read file\n")
+		return
+	}
 
+	startup()
 	ctx := new(context)
 	for i := 0; i < 256; i++ {
 		setInterrupt(ctx, i, handleInterrupts)
@@ -489,7 +517,11 @@ func main() {
 	for idx := range ctx.memory {
 		ctx.memory[idx] = op["hlt"]
 	}
+	program := []uint8(bytecode[:])
 	loadProgram(ctx, program, 0)
+	if debug_mode {
+		printProgram(program)
+	}
 
 	ret := 0
 	for ret == 0 {
