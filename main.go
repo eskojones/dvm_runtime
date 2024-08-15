@@ -3,9 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
-const debug_mode = true
+var debug_mode = false
 
 type interrupt_fn func(*context, uint8)
 
@@ -173,10 +174,7 @@ func startup() {
 		reg_value := ctx.registers[reg_index]
 		mem_highbyte := ctx.memory[ctx.registers[reg_pc]+2]
 		mem_lowbyte := ctx.memory[ctx.registers[reg_pc]+3]
-		mem_address := uint16(mem_highbyte)<<8 + uint16(mem_lowbyte)
-		mem_value_highbyte := ctx.memory[mem_address]
-		mem_value_lowbyte := ctx.memory[mem_address+1]
-		mem_value := uint16(mem_value_highbyte)<<8 + uint16(mem_value_lowbyte)
+		mem_value := uint16(mem_highbyte)<<8 + uint16(mem_lowbyte)
 		var result int16 = int16(mem_value) - int16(reg_value)
 		if result == 0 {
 			ctx.flags[flag_zero] = 1
@@ -503,6 +501,21 @@ func printProgram(program []uint8) {
 }
 
 func main() {
+	var source_file string = ""
+	for _, arg := range os.Args {
+		if strings.Index(arg, "--debug") == 0 {
+			debug_mode = true
+		} else {
+			source_file = strings.Clone(arg)
+			break
+		}
+	}
+
+	if len(source_file) == 0 {
+		fmt.Printf("usage: ./bleep [--debug] <program_file>\n")
+		return
+	}
+
 	bytecode, err := os.ReadFile(os.Args[1])
 	if err != nil {
 		fmt.Printf("unable to read file\n")
