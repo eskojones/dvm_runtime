@@ -501,22 +501,24 @@ func printProgram(program []uint8) {
 }
 
 func main() {
-	var source_file string = ""
-	for _, arg := range os.Args {
-		if strings.Index(arg, "--debug") == 0 {
-			debug_mode = true
-		} else {
-			source_file = strings.Clone(arg)
-			break
-		}
-	}
-
-	if len(source_file) == 0 {
+	var source_file string
+	if len(os.Args) < 2 {
 		fmt.Printf("usage: ./bleep [--debug] <program_file>\n")
 		return
 	}
 
-	bytecode, err := os.ReadFile(os.Args[1])
+	for _, arg := range os.Args {
+		if strings.Index(arg, "--") == 0 {
+			switch arg[2:] {
+			case "debug":
+				debug_mode = true
+			}
+		} else {
+			source_file = arg
+		}
+	}
+
+	bytecode, err := os.ReadFile(source_file)
 	if err != nil {
 		fmt.Printf("unable to read file\n")
 		return
