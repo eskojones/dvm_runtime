@@ -72,8 +72,13 @@ func startup() {
 		return 0
 	}})
 
+	// leftover instructions that will never be compiled because
+	// of our poor handling of immediate values in the compiler.
+	loadInstruction(instr{"ld", 0xfc, 4, func(ctx *context) int { return 0 }})
+	loadInstruction(instr{"st", 0xfd, 4, func(ctx *context) int { return 0 }})
+
 	// LD   reg,mem     - Load Register from Memory
-	loadInstruction(instr{"ld", 0x01, 4, func(ctx *context) int {
+	loadInstruction(instr{"ldi", 0x01, 4, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		mem_highbyte := uint16(ctx.memory[ctx.registers[reg_pc]+2])
 		mem_lowbyte := uint16(ctx.memory[ctx.registers[reg_pc]+3])
@@ -404,6 +409,43 @@ func startup() {
 		ctx.registers[reg_sp]++
 		ctx.registers[reg_pc] = address
 		return 1
+	}})
+
+	// push a register onto the stack
+	loadInstruction(instr{"push", 0x20, 2, func(ctx *context) int {
+		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
+		ctx.registers[reg_sp]++
+		ctx.stack[ctx.registers[reg_sp]] = ctx.registers[reg_index]
+		return 0
+	}})
+
+	// push a immediate value onto the stack
+	loadInstruction(instr{"pushi", 0x21, 3, func(ctx *context) int {
+		highbyte := ctx.memory[ctx.registers[reg_pc]+1]
+		lowbyte := ctx.memory[ctx.registers[reg_pc]+2]
+		value := (uint16(highbyte) << 8) + uint16(lowbyte)
+		ctx.registers[reg_sp]++
+		ctx.stack[ctx.registers[reg_sp]] = value
+		return 0
+	}})
+
+	// pop a value off the stack and into a register
+	loadInstruction(instr{"pop", 0x22, 2, func(ctx *context) int {
+		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
+		ctx.registers[reg_index] = ctx.stack[ctx.registers[reg_sp]]
+		ctx.registers[reg_sp]--
+		return 0
+	}})
+
+	// pop a value off the stack and into a memory address
+	loadInstruction(instr{"popi", 0x23, 3, func(ctx *context) int {
+		mem_highbyte := ctx.memory[ctx.registers[reg_pc]+1]
+		mem_lowbyte := ctx.memory[ctx.registers[reg_pc]+2]
+		mem_address := (uint16(mem_highbyte) << 8) + uint16(mem_lowbyte)
+		ctx.memory[mem_address] = uint8(ctx.stack[ctx.registers[reg_sp]] >> 8)
+		ctx.memory[mem_address+1] = uint8(ctx.stack[ctx.registers[reg_sp]] & 0x00ff)
+		ctx.registers[reg_sp]--
+		return 0
 	}})
 }
 
