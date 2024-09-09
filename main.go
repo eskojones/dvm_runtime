@@ -38,7 +38,6 @@ type instr_fn func(*context) int
 type instr struct {
 	name   string
 	opcode uint8
-	size   uint8
 	fn     instr_fn
 }
 
@@ -48,12 +47,12 @@ var op = make(map[string]uint8)          // map name->opcode
 
 func startup() {
 	// NOP - No Operation
-	loadInstruction(instr{"nop", 0x00, 1, func(ctx *context) int {
+	loadInstruction(instr{"nop", 0x00, func(ctx *context) int {
 		return 0
 	}})
 
 	// HLT - Halt Program
-	loadInstruction(instr{"hlt", 0xff, 1, func(ctx *context) int {
+	loadInstruction(instr{"hlt", 0xff, func(ctx *context) int {
 		if debug_mode {
 			fmt.Printf("[i] halting execution\n")
 		}
@@ -62,7 +61,7 @@ func startup() {
 	}})
 
 	// PRINT - Print the value of register to debug output
-	loadInstruction(instr{"print", 0xfe, 2, func(ctx *context) int {
+	loadInstruction(instr{"print", 0xfe, func(ctx *context) int {
 		if !debug_mode {
 			return 0
 		}
@@ -74,11 +73,11 @@ func startup() {
 
 	// leftover instructions that will never be compiled because
 	// of our poor handling of immediate values in the compiler.
-	loadInstruction(instr{"ld", 0xfc, 4, func(ctx *context) int { return 0 }})
-	loadInstruction(instr{"st", 0xfd, 4, func(ctx *context) int { return 0 }})
+	loadInstruction(instr{"ld", 0xfc, func(ctx *context) int { return 0 }})
+	loadInstruction(instr{"st", 0xfd, func(ctx *context) int { return 0 }})
 
 	// LD   reg,mem     - Load Register from Memory
-	loadInstruction(instr{"ldi", 0x01, 4, func(ctx *context) int {
+	loadInstruction(instr{"ldi", 0x01, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		mem_highbyte := uint16(ctx.memory[ctx.registers[reg_pc]+2])
 		mem_lowbyte := uint16(ctx.memory[ctx.registers[reg_pc]+3])
@@ -89,7 +88,7 @@ func startup() {
 	}})
 
 	// ST   mem,reg     - Store Register to Memory
-	loadInstruction(instr{"st", 0x02, 4, func(ctx *context) int {
+	loadInstruction(instr{"sti", 0x02, func(ctx *context) int {
 		mem_highbyte := uint16(ctx.memory[ctx.registers[reg_pc]+1])
 		mem_lowbyte := uint16(ctx.memory[ctx.registers[reg_pc]+2])
 		mem_address := (mem_highbyte << 8) + mem_lowbyte
@@ -102,7 +101,7 @@ func startup() {
 	}})
 
 	// INT  reg       - Call Interrupt <value in reg>
-	loadInstruction(instr{"int", 0x03, 2, func(ctx *context) int {
+	loadInstruction(instr{"int", 0x03, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		int_num := uint8(ctx.registers[reg_index] & 0x00ff)
 		if ctx.interrupts[int_num] != nil {
@@ -112,7 +111,7 @@ func startup() {
 	}})
 
 	// INT  value       - Call Interrupt <value>
-	loadInstruction(instr{"inti", 0x04, 3, func(ctx *context) int {
+	loadInstruction(instr{"inti", 0x04, func(ctx *context) int {
 		int_num := ctx.memory[ctx.registers[reg_pc]+2]
 		if ctx.interrupts[int_num] != nil {
 			ctx.interrupts[int_num](ctx, int_num)
@@ -121,7 +120,7 @@ func startup() {
 	}})
 
 	// RET              - Pop PC off of callstack and jump to address
-	loadInstruction(instr{"ret", 0x05, 1, func(ctx *context) int {
+	loadInstruction(instr{"ret", 0x05, func(ctx *context) int {
 		if ctx.registers[reg_sp] == 0 {
 			if debug_mode {
 				fmt.Printf("[!] invalid stack depth!")
@@ -134,7 +133,7 @@ func startup() {
 	}})
 
 	// MOV  reg,reg     - Move register into register
-	loadInstruction(instr{"mov", 0x06, 3, func(ctx *context) int {
+	loadInstruction(instr{"mov", 0x06, func(ctx *context) int {
 		dst_reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		src_reg_index := ctx.memory[ctx.registers[reg_pc]+2]
 		ctx.registers[dst_reg_index] = ctx.registers[src_reg_index]
@@ -142,7 +141,7 @@ func startup() {
 	}})
 
 	// MOVI reg,value   - Move value into register
-	loadInstruction(instr{"movi", 0x07, 4, func(ctx *context) int {
+	loadInstruction(instr{"movi", 0x07, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		value_highbyte := uint16(ctx.memory[ctx.registers[reg_pc]+2])
 		value_lowbyte := uint16(ctx.memory[ctx.registers[reg_pc]+3])
@@ -151,7 +150,7 @@ func startup() {
 	}})
 
 	// CMP  reg,reg     - Compare two registers
-	loadInstruction(instr{"cmp", 0x08, 3, func(ctx *context) int {
+	loadInstruction(instr{"cmp", 0x08, func(ctx *context) int {
 		reg1_index := ctx.memory[ctx.registers[reg_pc]+1]
 		reg2_index := ctx.memory[ctx.registers[reg_pc]+2]
 		reg1_value := ctx.registers[reg1_index]
@@ -174,7 +173,7 @@ func startup() {
 	}})
 
 	// CMPI reg,value   - Compare register with value
-	loadInstruction(instr{"cmpi", 0x09, 4, func(ctx *context) int {
+	loadInstruction(instr{"cmpi", 0x09, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		reg_value := ctx.registers[reg_index]
 		mem_highbyte := ctx.memory[ctx.registers[reg_pc]+2]
@@ -198,14 +197,14 @@ func startup() {
 	}})
 
 	// JMP  reg         - Unconditional jump to address contained in register
-	loadInstruction(instr{"jmp", 0x0a, 2, func(ctx *context) int {
+	loadInstruction(instr{"jmp", 0x0a, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		ctx.registers[reg_pc] = ctx.registers[reg_index]
 		return 1
 	}})
 
 	// JMPI address     - Unconditional jump to address
-	loadInstruction(instr{"jmpi", 0x0b, 3, func(ctx *context) int {
+	loadInstruction(instr{"jmpi", 0x0b, func(ctx *context) int {
 		address_highbyte := ctx.memory[ctx.registers[reg_pc]+1]
 		address_lowbyte := ctx.memory[ctx.registers[reg_pc]+2]
 		ctx.registers[reg_pc] = uint16(address_highbyte)<<8 + uint16(address_lowbyte)
@@ -213,7 +212,7 @@ func startup() {
 	}})
 
 	// JZ   reg         - Jump if zero flag set, address contained in register
-	loadInstruction(instr{"jz", 0x0c, 2, func(ctx *context) int {
+	loadInstruction(instr{"jz", 0x0c, func(ctx *context) int {
 		if ctx.flags[flag_zero] == 0 {
 			return 0
 		}
@@ -223,7 +222,7 @@ func startup() {
 	}})
 
 	// JZI  address     - Jump if zero flag set
-	loadInstruction(instr{"jzi", 0x0d, 3, func(ctx *context) int {
+	loadInstruction(instr{"jzi", 0x0d, func(ctx *context) int {
 		if ctx.flags[flag_zero] == 0 {
 			return 0
 		}
@@ -234,7 +233,7 @@ func startup() {
 	}})
 
 	// JNZ  reg
-	loadInstruction(instr{"jnz", 0x0e, 2, func(ctx *context) int {
+	loadInstruction(instr{"jnz", 0x0e, func(ctx *context) int {
 		if ctx.flags[flag_zero] == 0 {
 			return 0
 		}
@@ -244,7 +243,7 @@ func startup() {
 	}})
 
 	// JNZI address
-	loadInstruction(instr{"jnzi", 0x0f, 3, func(ctx *context) int {
+	loadInstruction(instr{"jnzi", 0x0f, func(ctx *context) int {
 		if ctx.flags[flag_zero] == 0 {
 			return 0
 		}
@@ -255,7 +254,7 @@ func startup() {
 	}})
 
 	// JL   reg
-	loadInstruction(instr{"jl", 0x10, 2, func(ctx *context) int {
+	loadInstruction(instr{"jl", 0x10, func(ctx *context) int {
 		if ctx.flags[flag_lessthan] == 0 {
 			return 0
 		}
@@ -265,7 +264,7 @@ func startup() {
 	}})
 
 	// JLI  address
-	loadInstruction(instr{"jli", 0x11, 3, func(ctx *context) int {
+	loadInstruction(instr{"jli", 0x11, func(ctx *context) int {
 		if ctx.flags[flag_lessthan] == 0 {
 			return 0
 		}
@@ -276,7 +275,7 @@ func startup() {
 	}})
 
 	// JG   reg
-	loadInstruction(instr{"jg", 0x12, 2, func(ctx *context) int {
+	loadInstruction(instr{"jg", 0x12, func(ctx *context) int {
 		if ctx.flags[flag_morethan] == 0 {
 			return 0
 		}
@@ -286,7 +285,7 @@ func startup() {
 	}})
 
 	// JGI  address
-	loadInstruction(instr{"jgi", 0x13, 3, func(ctx *context) int {
+	loadInstruction(instr{"jgi", 0x13, func(ctx *context) int {
 		if ctx.flags[flag_morethan] == 0 {
 			return 0
 		}
@@ -297,21 +296,21 @@ func startup() {
 	}})
 
 	// INC  reg
-	loadInstruction(instr{"inc", 0x14, 2, func(ctx *context) int {
+	loadInstruction(instr{"inc", 0x14, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		ctx.registers[reg_index]++
 		return 0
 	}})
 
 	// DEC  reg
-	loadInstruction(instr{"dec", 0x15, 2, func(ctx *context) int {
+	loadInstruction(instr{"dec", 0x15, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		ctx.registers[reg_index]--
 		return 0
 	}})
 
 	// ADD  reg,reg
-	loadInstruction(instr{"add", 0x16, 3, func(ctx *context) int {
+	loadInstruction(instr{"add", 0x16, func(ctx *context) int {
 		reg1_index := ctx.memory[ctx.registers[reg_pc]+1]
 		reg2_index := ctx.memory[ctx.registers[reg_pc]+2]
 		ctx.registers[reg1_index] += ctx.registers[reg2_index]
@@ -319,7 +318,7 @@ func startup() {
 	}})
 
 	// ADDI reg,value
-	loadInstruction(instr{"addi", 0x17, 4, func(ctx *context) int {
+	loadInstruction(instr{"addi", 0x17, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		value_highbyte := uint16(ctx.memory[ctx.registers[reg_pc]+2])
 		value_lowbyte := uint16(ctx.memory[ctx.registers[reg_pc]+3])
@@ -328,7 +327,7 @@ func startup() {
 	}})
 
 	// SUB  reg,reg
-	loadInstruction(instr{"sub", 0x18, 3, func(ctx *context) int {
+	loadInstruction(instr{"sub", 0x18, func(ctx *context) int {
 		reg1_index := ctx.memory[ctx.registers[reg_pc]+1]
 		reg2_index := ctx.memory[ctx.registers[reg_pc]+2]
 		ctx.registers[reg1_index] -= ctx.registers[reg2_index]
@@ -336,7 +335,7 @@ func startup() {
 	}})
 
 	// SUBI reg,value
-	loadInstruction(instr{"subi", 0x19, 4, func(ctx *context) int {
+	loadInstruction(instr{"subi", 0x19, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		value_highbyte := uint16(ctx.memory[ctx.registers[reg_pc]+2])
 		value_lowbyte := uint16(ctx.memory[ctx.registers[reg_pc]+3])
@@ -345,7 +344,7 @@ func startup() {
 	}})
 
 	// MUL  reg,reg
-	loadInstruction(instr{"mul", 0x1a, 3, func(ctx *context) int {
+	loadInstruction(instr{"mul", 0x1a, func(ctx *context) int {
 		reg1_index := ctx.memory[ctx.registers[reg_pc]+1]
 		reg2_index := ctx.memory[ctx.registers[reg_pc]+2]
 		ctx.registers[reg1_index] *= ctx.registers[reg2_index]
@@ -353,7 +352,7 @@ func startup() {
 	}})
 
 	// MULI reg,value
-	loadInstruction(instr{"muli", 0x1b, 4, func(ctx *context) int {
+	loadInstruction(instr{"muli", 0x1b, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		value_highbyte := uint16(ctx.memory[ctx.registers[reg_pc]+2])
 		value_lowbyte := uint16(ctx.memory[ctx.registers[reg_pc]+3])
@@ -362,7 +361,7 @@ func startup() {
 	}})
 
 	// DIV  reg,reg
-	loadInstruction(instr{"div", 0x1c, 3, func(ctx *context) int {
+	loadInstruction(instr{"div", 0x1c, func(ctx *context) int {
 		reg1_index := ctx.memory[ctx.registers[reg_pc]+1]
 		reg2_index := ctx.memory[ctx.registers[reg_pc]+2]
 		ctx.registers[reg1_index] /= ctx.registers[reg2_index]
@@ -370,7 +369,7 @@ func startup() {
 	}})
 
 	// DIVI reg,value
-	loadInstruction(instr{"divi", 0x1d, 4, func(ctx *context) int {
+	loadInstruction(instr{"divi", 0x1d, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		value_highbyte := uint16(ctx.memory[ctx.registers[reg_pc]+2])
 		value_lowbyte := uint16(ctx.memory[ctx.registers[reg_pc]+3])
@@ -379,7 +378,7 @@ func startup() {
 	}})
 
 	// CALL reg     - Push PC onto callstack and jump to address contained in register
-	loadInstruction(instr{"call", 0x1e, 2, func(ctx *context) int {
+	loadInstruction(instr{"call", 0x1e, func(ctx *context) int {
 		if ctx.registers[reg_sp] == 1023 {
 			if debug_mode {
 				fmt.Printf("[!] maximum callstack exceeded!")
@@ -395,7 +394,7 @@ func startup() {
 	}})
 
 	// CALL address     - Push PC onto callstack and jump to address
-	loadInstruction(instr{"calli", 0x1f, 3, func(ctx *context) int {
+	loadInstruction(instr{"calli", 0x1f, func(ctx *context) int {
 		if ctx.registers[reg_sp] == 1023 {
 			if debug_mode {
 				fmt.Printf("[!] maximum callstack exceeded!")
@@ -405,6 +404,9 @@ func startup() {
 		address_highbyte := ctx.memory[ctx.registers[reg_pc]+1]
 		address_lowbyte := ctx.memory[ctx.registers[reg_pc]+2]
 		address := (uint16(address_highbyte) << 8) + uint16(address_lowbyte)
+        if debug_mode && address % 4 != 0 {
+            fmt.Printf("[!] unaligned call address!\n")
+        }
 		ctx.stack[ctx.registers[reg_sp]] = ctx.registers[reg_pc] + 3
 		ctx.registers[reg_sp]++
 		ctx.registers[reg_pc] = address
@@ -412,7 +414,7 @@ func startup() {
 	}})
 
 	// push a register onto the stack
-	loadInstruction(instr{"push", 0x20, 2, func(ctx *context) int {
+	loadInstruction(instr{"push", 0x20, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		ctx.registers[reg_sp]++
 		ctx.stack[ctx.registers[reg_sp]] = ctx.registers[reg_index]
@@ -420,7 +422,7 @@ func startup() {
 	}})
 
 	// push a immediate value onto the stack
-	loadInstruction(instr{"pushi", 0x21, 3, func(ctx *context) int {
+	loadInstruction(instr{"pushi", 0x21, func(ctx *context) int {
 		highbyte := ctx.memory[ctx.registers[reg_pc]+1]
 		lowbyte := ctx.memory[ctx.registers[reg_pc]+2]
 		value := (uint16(highbyte) << 8) + uint16(lowbyte)
@@ -430,7 +432,7 @@ func startup() {
 	}})
 
 	// pop a value off the stack and into a register
-	loadInstruction(instr{"pop", 0x22, 2, func(ctx *context) int {
+	loadInstruction(instr{"pop", 0x22, func(ctx *context) int {
 		reg_index := ctx.memory[ctx.registers[reg_pc]+1]
 		ctx.registers[reg_index] = ctx.stack[ctx.registers[reg_sp]]
 		ctx.registers[reg_sp]--
@@ -438,7 +440,7 @@ func startup() {
 	}})
 
 	// pop a value off the stack and into a memory address
-	loadInstruction(instr{"popi", 0x23, 3, func(ctx *context) int {
+	loadInstruction(instr{"popi", 0x23, func(ctx *context) int {
 		mem_highbyte := ctx.memory[ctx.registers[reg_pc]+1]
 		mem_lowbyte := ctx.memory[ctx.registers[reg_pc]+2]
 		mem_address := (uint16(mem_highbyte) << 8) + uint16(mem_lowbyte)
@@ -447,6 +449,20 @@ func startup() {
 		ctx.registers[reg_sp]--
 		return 0
 	}})
+
+    loadInstruction(instr{"shl", 0x24, func(ctx *context) int {
+        reg_index := ctx.memory[ctx.registers[reg_pc]+1]
+        bits := ctx.memory[ctx.registers[reg_pc]+2]
+        ctx.registers[reg_index] = ctx.registers[reg_index] << bits
+        return 0
+    }})
+    
+    loadInstruction(instr{"shr", 0x25, func(ctx *context) int {
+        reg_index := ctx.memory[ctx.registers[reg_pc]+1]
+        bits := ctx.memory[ctx.registers[reg_pc]+2]
+        ctx.registers[reg_index] = ctx.registers[reg_index] >> bits
+        return 0
+    }})
 }
 
 func step(instructions map[uint8]instr, ctx *context) int {
@@ -461,7 +477,7 @@ func step(instructions map[uint8]instr, ctx *context) int {
 
 	if debug_mode {
 		fmt.Printf("[.] 0x%04x %-5s ", ctx.registers[reg_pc], instr.name)
-		for i := uint8(0); i < instr.size; i++ {
+		for i := uint8(0); i < 4; i++ {
 			fmt.Printf("%02x ", ctx.memory[ctx.registers[reg_pc]+uint16(i)])
 		}
 		fmt.Printf("\n")
@@ -469,7 +485,7 @@ func step(instructions map[uint8]instr, ctx *context) int {
 
 	ret := instr.fn(ctx)
 	if ret == 0 {
-		ctx.registers[reg_pc] += uint16(instr.size)
+		ctx.registers[reg_pc] += 4
 	} else if ret == 1 {
 		// the instruction modified PC
 		ret = 0
